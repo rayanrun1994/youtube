@@ -24,6 +24,16 @@ on:
         required: false
         type: string
         default: ''
+      tgBotToken:
+        description: 'Telegram Bot Token'
+        required: false
+        type: string
+        default: ''
+      tgChatId:
+        description: 'Telegram Chat ID'
+        required: false
+        type: string
+        default: ''
 
 jobs:
   download_and_merge:
@@ -194,20 +204,80 @@ jobs:
             exit 1
           fi
           
-          # Upload via file.io to get ephemeral link (2 minutes lifespan)
-          echo "==== البدء برفع الملف المعالج إلى file.io ===="
-          UPLOAD_RES=$(curl -s -F "file=@$FILE" https://file.io) || true
-          echo "استجابة file.io:"
-          echo "$UPLOAD_RES"
-          TEMP_URL=$(echo "$UPLOAD_RES" | jq -r '.link // empty')
+          # Rename the final file before upload to match requested filename
+          EXT="${FILE##*.}"
+          mv "$FILE" "final_video.$EXT"
+          FILE="final_video.$EXT"
           
-          if [ -n "$TEMP_URL" ] && [[ "$TEMP_URL" == *"http"* ]]; then
+          # Upload via Telegram if configured or fallback to other cloud drives
+          TG_BOT_TOKEN="${{ github.event.inputs.tgBotToken }}"
+          TG_CHAT_ID="${{ github.event.inputs.tgChatId }}"
+          TEMP_URL=""
+          
+          if [ -n "$TG_BOT_TOKEN" ] && [ -n "$TG_CHAT_ID" ]; then
+            echo "==== البدء برفع الملف المعالج إلى تيليجرام ===="
+            # We use sendDocument as it supports any video, audio, or document format up to 50MB
+            UPLOAD_RES=$(curl -s -F "chat_id=$TG_CHAT_ID" -F "document=@$FILE" "https://api.telegram.org/bot$TG_BOT_TOKEN/sendDocument") || true
+            echo "استجابة تيليجرام:"
+            echo "$UPLOAD_RES"
+            FILE_ID=$(echo "$UPLOAD_RES" | jq -r '.result.document.file_id // .result.video.file_id // .result.audio.file_id // .result.voice.file_id // empty')
+            if [ -n "$FILE_ID" ] && [[ "$FILE_ID" != "null" ]]; then
+              TEMP_URL="telegram-file:$FILE_ID"
+              echo "✅ تم الرفع إلى تيليجرام بنجاح! معرف الملف: $FILE_ID"
+            else
+              echo "⚠️ فشل الرفع لتيليجرام (قد يكون الملف أكبر من حد 50MB المسموح به للبوتات أو أن البوت/القناة غير معدادين)."
+            fi
+          fi
+          
+          # Upload via file.io if Telegram was not processed or failed
+          if [ -z "$TEMP_URL" ] || [[ "$TEMP_URL" == "null" ]]; then
+            echo "==== البدء برفع الملف المعالج إلى file.io ===="
+            UPLOAD_RES=""
+            for i in {1..3}; do
+              echo "محاولة الرفع إلى file.io ($i/3)..."
+              # Try to upload using the requested curl format with expires=2m
+              UPLOAD_RES=$(curl -s -L --connect-timeout 30 --max-time 300 -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" -F "file=@$FILE" -F "expires=2m" "https://file.io") || true
+              if [ -n "$UPLOAD_RES" ] && [[ "$UPLOAD_RES" == *"link"* ]]; then
+                break
+              fi
+              sleep 2
+            done
+            
+            echo "استجابة file.io:"
+            echo "$UPLOAD_RES"
+            TEMP_URL=$(echo "$UPLOAD_RES" | jq -r '.link // empty')
+          fi
+          
+          # Fallback if file.io failed (e.g. rate limits or temporary service disruption)
+          if [ -z "$TEMP_URL" ] || [[ "$TEMP_URL" == "null" ]]; then
+            echo "⚠️ فشل الرفع لـ file.io (على الرغم من أن الحد الأقصى للمنصة هو 2 جيجا بايت عبر الـ API، إلا أنه قد يحدث فشل بسبب قيود معدلات الطلب أو انقطاع الخدمة)."
+            echo "جاري تجربة خادم الرفع البديل والآمن TmpFiles (الذي يدعم حتى 10 جيجا بايت)..."
+            
+            for i in {1..2}; do
+              echo "محاولة الرفع البديل إلى TmpFiles ($i/2)..."
+              TMPFILES_RES=$(curl -s -L --connect-timeout 30 --max-time 600 -F "file=@$FILE" https://tmpfiles.org/api/v1/upload) || true
+              TEMP_URL=$(echo "$TMPFILES_RES" | jq -r '.data.url // empty' | sed 's|tmpfiles.org/|tmpfiles.org/dl/|')
+              if [ -n "$TEMP_URL" ] && [[ "$TEMP_URL" == *"http"* ]]; then
+                echo "✅ تم الرفع البديل بنجاح إلى TmpFiles: $TEMP_URL"
+                break
+              fi
+              sleep 2
+            done
+          fi
+
+          if [ -z "$TEMP_URL" ] || [[ "$TEMP_URL" == "null" ]]; then
+            echo "⚠️ فشل الرفع لـ TmpFiles أيضاً. جاري تجربة Bashupload (يدعم حتى 50 جيجا بايت)..."
+            BASHUPLOAD_RES=$(curl -sT "$FILE" "https://bashupload.com/$(basename "$FILE")") || true
+            TEMP_URL=$(echo "$BASHUPLOAD_RES" | grep -o -E "https?://bashupload.com/[a-zA-Z0-9./_-]+" | head -n 1)
+          fi
+          
+          if [ -n "$TEMP_URL" ]; then
             DOWNLOAD_URL="$TEMP_URL"
             echo "DOWNLOAD_URL=$DOWNLOAD_URL" >> $GITHUB_ENV
             echo "JOB_OUT_STATUS=success" >> $GITHUB_ENV
-            echo "✅ تمت العملية بنجاح. رابط file.io المؤقت: $DOWNLOAD_URL"
+            echo "✅ تمت العملية بنجاح. الرابط: $DOWNLOAD_URL"
           else
-            echo "YT_ERROR=فشل رفع الملف إلى منصة file.io المؤقتة." >> $GITHUB_ENV
+            echo "YT_ERROR=فشل رفع الملف إلى جميع منصات الحفظ السحابي المؤقتة وتليجرام." >> $GITHUB_ENV
             echo "JOB_OUT_STATUS=failure" >> $GITHUB_ENV
             exit 1
           fi
