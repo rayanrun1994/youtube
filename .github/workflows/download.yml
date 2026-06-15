@@ -194,71 +194,20 @@ jobs:
             exit 1
           fi
           
-          # Upload via multiple providers to guarantee success (Catbox/Litterbox, Tmpfiles, Transfer, Bashupload)
-          echo "==== البدء برفع الملف المعالج إلى الخوادم السحابية المؤقتة ===="
-          echo "" > upload_log.txt
-          UPLOAD_URL=""
-          UPLOAD_SUCCESS=0
+          # Upload via file.io to get ephemeral link (2 minutes lifespan)
+          echo "==== البدء برفع الملف المعالج إلى file.io ===="
+          UPLOAD_RES=$(curl -s -F "file=@$FILE" https://file.io) || true
+          echo "استجابة file.io:"
+          echo "$UPLOAD_RES"
+          TEMP_URL=$(echo "$UPLOAD_RES" | jq -r '.link // empty')
           
-          # 1. المحاولة الأولى: Litterbox (Catbox.moe) - مباشر وصلاحية 12 ساعة
-          echo "-- المحاولة الأولى للرفع: Litterbox --"
-          TEMP_URL=$(curl -s -F "reqtype=fileupload" -F "time=12h" -F "fileToUpload=@$FILE" https://litterbox.catbox.moe/api) || true
-          if [ -n "$TEMP_URL" ] && [[ "$TEMP_URL" == *"http"* ]] && ! [[ "$TEMP_URL" == *"error"* ]]; then
-            UPLOAD_URL="$TEMP_URL"
-            UPLOAD_SUCCESS=1
-            echo "✅ تم الرفع بنجاح إلى Litterbox: $UPLOAD_URL"
-          else
-            echo "⚠️ فشل الرفع لـ Litterbox أو تم رفض الطلب."
-          fi
-          
-          # 2. المحاولة الثانية: TmpFiles.org - سريع جداً وبدون قيود شائعة (يحفظ لـ 24 ساعة)
-          if [ $UPLOAD_SUCCESS -eq 0 ]; then
-            echo "-- المحاولة الثانية للرفع: TmpFiles --"
-            TMPFILES_RES=$(curl -s -F "file=@$FILE" https://tmpfiles.org/api/v1/upload) || true
-            TEMP_URL=$(echo "$TMPFILES_RES" | grep -o '"url":"[^"]*"' | head -n 1 | cut -d'"' -f4 | sed 's|tmpfiles.org/|tmpfiles.org/dl/|')
-            if [ -n "$TEMP_URL" ] && [[ "$TEMP_URL" == *"http"* ]]; then
-              UPLOAD_URL="$TEMP_URL"
-              UPLOAD_SUCCESS=1
-              echo "✅ تم الرفع بنجاح إلى TmpFiles: $UPLOAD_URL"
-            else
-              echo "⚠️ فشل الرفع لـ TmpFiles أو حدث خطأ في الاستجابة: $TMPFILES_RES"
-            fi
-          fi
-          
-          # 3. المحاولة الثالثة: Transfer.sh - ممتاز لملفات الفيديو الكبيرة (صلاحية 14 يوم)
-          if [ $UPLOAD_SUCCESS -eq 0 ]; then
-            echo "-- المحاولة الثالثة للرفع: Transfer.sh --"
-            TEMP_URL=$(curl -s -H "Max-Days: 1" --upload-file "$FILE" "https://transfer.sh/$(basename "$FILE")") || true
-            if [ -n "$TEMP_URL" ] && [[ "$TEMP_URL" == *"http"* ]]; then
-              UPLOAD_URL="$TEMP_URL"
-              UPLOAD_SUCCESS=1
-              echo "✅ تم الرفع بنجاح إلى Transfer.sh: $UPLOAD_URL"
-            else
-              echo "⚠️ فشل الرفع لـ Transfer.sh."
-            fi
-          fi
-          
-          # 4. المحاولة الرابعة: Bashupload.com - رفع مستقر وبسيط للملفات في الخلفية
-          if [ $UPLOAD_SUCCESS -eq 0 ]; then
-            echo "-- المحاولة الرابعة للرفع: Bashupload --"
-            BASHUPLOAD_RES=$(curl -sT "$FILE" "https://bashupload.com/$(basename "$FILE")") || true
-            TEMP_URL=$(echo "$BASHUPLOAD_RES" | grep -o -E "https?://bashupload.com/[a-zA-Z0-9./_-]+" | head -n 1)
-            if [ -n "$TEMP_URL" ] && [[ "$TEMP_URL" == *"http"* ]]; then
-              UPLOAD_URL="$TEMP_URL"
-              UPLOAD_SUCCESS=1
-              echo "✅ تم الرفع بنجاح إلى Bashupload: $UPLOAD_URL"
-            else
-              echo "⚠️ فشل الرفع لـ Bashupload."
-            fi
-          fi
-          
-          # التحقق النهائي من حالة الرفع
-          if [ $UPLOAD_SUCCESS -eq 1 ] && [ -n "$UPLOAD_URL" ]; then
-            echo "DOWNLOAD_URL=$UPLOAD_URL" >> $GITHUB_ENV
+          if [ -n "$TEMP_URL" ] && [[ "$TEMP_URL" == *"http"* ]]; then
+            DOWNLOAD_URL="$TEMP_URL"
+            echo "DOWNLOAD_URL=$DOWNLOAD_URL" >> $GITHUB_ENV
             echo "JOB_OUT_STATUS=success" >> $GITHUB_ENV
-            echo "✅ تمت العملية بالكامل بنجاح وتم إرسال الرابط النهائي: $UPLOAD_URL"
+            echo "✅ تمت العملية بنجاح. رابط file.io المؤقت: $DOWNLOAD_URL"
           else
-            echo "YT_ERROR=فشل رفع الملف لجميع منصات الحفظ السحابي المؤقتة. يرجى مراجعة Logs السيرفر." >> $GITHUB_ENV
+            echo "YT_ERROR=فشل رفع الملف إلى منصة file.io المؤقتة." >> $GITHUB_ENV
             echo "JOB_OUT_STATUS=failure" >> $GITHUB_ENV
             exit 1
           fi
