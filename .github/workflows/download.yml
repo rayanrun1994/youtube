@@ -1,1 +1,49 @@
-.github/workflows/
+name: YouTube Serverless Backend
+
+on:
+  repository_dispatch:
+    types: [download_video]
+
+jobs:
+  download_and_merge:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install Dependencies (yt-dlp & ffmpeg)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg curl python3
+          sudo curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp
+          sudo chmod a+rx /usr/local/bin/yt-dlp
+
+      - name: Download & Process Video
+        run: |
+          URL="${{ github.event.client_payload.url }}"
+          QUALITY="${{ github.event.client_payload.quality }}"
+          
+          if [ "$QUALITY" == "mp3" ]; then
+            yt-dlp -x --audio-format mp3 "$URL" -o "output.%(ext)s"
+            FILE="output.mp3"
+          elif [ "$QUALITY" == "2160" ] || [ "$QUALITY" == "1440" ] || [ "$QUALITY" == "1080" ]; then
+            yt-dlp -f "bestvideo[height<=$QUALITY]+bestaudio/best" "$URL" -o "output.%(ext)s" --merge-output-format mp4
+            FILE="output.mp4"
+          else
+            yt-dlp -f "bestvideo[height<=${QUALITY}]+bestaudio/best" "$URL" -o "output.%(ext)s" --merge-output-format mp4
+            FILE="output.mp4"
+          fi
+          
+          # Upload via Litterbox (Catbox.moe) for direct linkage (Valid 12 Hours, up to 1GB)
+          # Free, high availability, straight to direct file
+          UPLOAD_URL=$(curl -s -F "reqtype=fileupload" -F "time=12h" -F "fileToUpload=@$FILE" https://litterbox.catbox.moe/api)
+          
+          echo "DOWNLOAD_URL=$UPLOAD_URL" >> $GITHUB_ENV
+
+      - name: Send Webhook
+        if: always()
+        run: |
+          WEBHOOK_URL="${{ github.event.client_payload.webhookUrl }}"
+          WEBHOOK_ID="${{ github.event.client_payload.webhookId }}"
+          
+          curl -X POST -H "Content-Type: application/json" \
+            -d "{\"id\":\"$WEBHOOK_ID\", \"url\":\"${{ env.DOWNLOAD_URL }}\", \"status\":\"${{ job.status }}\"}" \
+            "$WEBHOOK_URL"
+            
