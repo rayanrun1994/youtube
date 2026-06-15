@@ -1,49 +1,69 @@
 name: YouTube Serverless Backend
 
 on:
-  repository_dispatch:
-    types: [download_video]
+  workflow_dispatch:
+    inputs:
+      url:
+        description: 'YouTube Video URL'
+        required: true
+        type: string
+      quality:
+        description: 'Quality (e.g. 1080, mp3)'
+        required: true
+        type: string
+      webhookId:
+        description: 'ID for tracking'
+        required: true
+        type: string
+      webhookUrl:
+        description: 'Callback URL'
+        required: true
+        type: string
 
 jobs:
   download_and_merge:
     runs-on: ubuntu-latest
     steps:
-      - name: Install Dependencies (yt-dlp & ffmpeg)
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg curl python3
+          sudo apt-get install -y ffmpeg
           sudo curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp
           sudo chmod a+rx /usr/local/bin/yt-dlp
 
       - name: Download & Process Video
         run: |
-          URL="${{ github.event.client_payload.url }}"
-          QUALITY="${{ github.event.client_payload.quality }}"
+          URL="${{ github.event.inputs.url }}"
+          QUALITY="${{ github.event.inputs.quality }}"
           
           if [ "$QUALITY" == "mp3" ]; then
             yt-dlp -x --audio-format mp3 "$URL" -o "output.%(ext)s"
-            FILE="output.mp3"
-          elif [ "$QUALITY" == "2160" ] || [ "$QUALITY" == "1440" ] || [ "$QUALITY" == "1080" ]; then
-            yt-dlp -f "bestvideo[height<=$QUALITY]+bestaudio/best" "$URL" -o "output.%(ext)s" --merge-output-format mp4
-            FILE="output.mp4"
           else
-            yt-dlp -f "bestvideo[height<=${QUALITY}]+bestaudio/best" "$URL" -o "output.%(ext)s" --merge-output-format mp4
-            FILE="output.mp4"
+            yt-dlp -f "bv*[height<=$QUALITY]+ba/b[height<=$QUALITY]" --merge-output-format mp4 "$URL" -o "output.%(ext)s"
           fi
           
-          # Upload via Litterbox (Catbox.moe) for direct linkage (Valid 12 Hours, up to 1GB)
-          # Free, high availability, straight to direct file
-          UPLOAD_URL=$(curl -s -F "reqtype=fileupload" -F "time=12h" -F "fileToUpload=@$FILE" https://litterbox.catbox.moe/api)
-          
-          echo "DOWNLOAD_URL=$UPLOAD_URL" >> $GITHUB_ENV
+          # الحصول على مسار الملف الناتج وتخزينه في البيئة
+          FILE_PATH=$(find . -name "output.*" | head -n 1)
+          echo "DOWNLOAD_PATH=$FILE_PATH" >> $GITHUB_ENV
+
+      # إضافة خطوات الرفع وإنشاء رابط التحميل هنا (حسب السيرفر السحابي الذي تستخدمه)
+      # لنفترض أنك ترفع الملف على خادم مؤقت أو ترجع الرابط المباشر:
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: youtube-video
+          path: output.*
 
       - name: Send Webhook
         if: always()
         run: |
-          WEBHOOK_URL="${{ github.event.client_payload.webhookUrl }}"
-          WEBHOOK_ID="${{ github.event.client_payload.webhookId }}"
+          WEBHOOK_URL="${{ github.event.inputs.webhookUrl }}"
+          WEBHOOK_ID="${{ github.event.inputs.webhookId }}"
           
+          # تأكد من استبدال DOWNLOAD_URL برابط الرفع النهائي للملف
           curl -X POST -H "Content-Type: application/json" \
             -d "{\"id\":\"$WEBHOOK_ID\", \"url\":\"${{ env.DOWNLOAD_URL }}\", \"status\":\"${{ job.status }}\"}" \
-            "$WEBHOOK_URL"
-            
+            $WEBHOOK_URL
