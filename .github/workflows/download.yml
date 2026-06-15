@@ -213,58 +213,27 @@ jobs:
           mv "$FILE" "final_video.$EXT"
           FILE="final_video.$EXT"
           
-          # Upload via Telegram if configured or fallback to other cloud drives
+          # Upload via Telegram only
           TG_BOT_TOKEN="${{ github.event.inputs.tgBotToken }}"
           TG_CHAT_ID="${{ github.event.inputs.tgChatId }}"
-          TEMP_URL=""
-          TG_URL=""
-          TMP_URL=""
+          DOWNLOAD_URL=""
           
           if [ -n "$TG_BOT_TOKEN" ] && [ -n "$TG_CHAT_ID" ]; then
             echo "==== البدء برفع الملف المعالج إلى تيليجرام ===="
-            # We use sendDocument as it supports any video, audio, or document format up to 50MB
             UPLOAD_RES=$(curl -s -F "chat_id=$TG_CHAT_ID" -F "document=@$FILE" "https://api.telegram.org/bot$TG_BOT_TOKEN/sendDocument") || true
             echo "استجابة تيليجرام:"
             echo "$UPLOAD_RES"
             FILE_ID=$(echo "$UPLOAD_RES" | jq -r '.result.document.file_id // .result.video.file_id // .result.audio.file_id // .result.voice.file_id // empty')
             if [ -n "$FILE_ID" ] && [[ "$FILE_ID" != "null" ]]; then
-              TG_URL="https://t.me/file?id=$FILE_ID"
+              DOWNLOAD_URL="telegram-file:$FILE_ID"
               echo "✅ تم الرفع إلى تيليجرام بنجاح! معرف الملف: $FILE_ID"
             else
               echo "⚠️ فشل الرفع لتيليجرام (قد يكون الملف أكبر من حد 50MB المسموح به للبوتات أو أن البوت/القناة غير معدادين)."
             fi
           fi
           
-          # Always upload to TmpFiles so we have a reliable download link (since Telegram bots can't download files > 20MB)
-          echo "==== البدء برفع الملف إلى TmpFiles للحصول على رابط أمان مجاني (حتى 10 جيجا بايت) ===="
-          for i in {1..2}; do
-            echo "محاولة الرفع إلى TmpFiles ($i/2)..."
-            TMPFILES_RES=$(curl -s -L --connect-timeout 30 --max-time 600 -F "file=@$FILE" https://tmpfiles.org/api/v1/upload) || true
-            TMP_URL=$(echo "$TMPFILES_RES" | jq -r '.data.url // empty' | sed 's|tmpfiles.org/|tmpfiles.org/dl/|')
-            if [ -n "$TMP_URL" ] && [[ "$TMP_URL" == *"http"* ]]; then
-              echo "✅ تم الرفع بنجاح إلى TmpFiles: $TMP_URL"
-              break
-            fi
-            sleep 2
-          done
-
-          if [ -z "$TMP_URL" ] || [[ "$TMP_URL" == "null" ]]; then
-            echo "⚠️ فشل الرفع لـ TmpFiles. جاري تجربة Bashupload (يدعم حتى 50 جيجا بايت)..."
-            BASHUPLOAD_RES=$(curl -sT "$FILE" "https://bashupload.com/$(basename "$FILE")") || true
-            TMP_URL=$(echo "$BASHUPLOAD_RES" | grep -o -E "https?://bashupload.com/[a-zA-Z0-9./_-]+" | head -n 1)
-          fi
           
-          # Combine URLs
-          if [ -n "$TG_URL" ] && [ -n "$TMP_URL" ]; then
-            DOWNLOAD_URL="$TG_URL|$TMP_URL"
-          elif [ -n "$TG_URL" ]; then
-            DOWNLOAD_URL="$TG_URL"
-          elif [ -n "$TMP_URL" ]; then
-            DOWNLOAD_URL="$TMP_URL"
-          else
-            DOWNLOAD_URL=""
-          fi
-          
+                    
           if [ -n "$DOWNLOAD_URL" ]; then
             echo "DOWNLOAD_URL=$DOWNLOAD_URL" >> $GITHUB_ENV
             echo "JOB_OUT_STATUS=success" >> $GITHUB_ENV
