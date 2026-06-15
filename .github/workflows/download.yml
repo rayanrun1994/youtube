@@ -279,9 +279,18 @@ jobs:
             ERROR_MSG="فشل تنفيذ الخطوات في جيت هاب."
           fi
           
-          SAFE_ERROR_MSG=$(echo "$ERROR_MSG" | tr -d '"' | tr -d "'")
+          # بناء الـ JSON بشكل فائق الأمان عبر jq لتجنب كسر الهيكل مهما كانت لغة ونوع محتوى الخطأ
+          jq -n \
+            --arg id "$WEBHOOK_ID" \
+            --arg url "${{ env.DOWNLOAD_URL }}" \
+            --arg status "$FINAL_STATUS" \
+            --arg error "$ERROR_MSG" \
+            '{id: $id, url: $url, status: $status, error: $error}' > webhook_payload.json
           
-          curl -X POST -H "Content-Type: application/json" \
-            -d "{\"id\":\"$WEBHOOK_ID\", \"url\":\"${{ env.DOWNLOAD_URL }}\", \"status\":\"$FINAL_STATUS\", \"error\":\"$SAFE_ERROR_MSG\"}" \
+          echo "==== محتوى الويب هوك المرسل ===="
+          cat webhook_payload.json
+          
+          curl -L --post301 --post302 --post303 -X POST -H "Content-Type: application/json" \
+            -d @webhook_payload.json \
             "$WEBHOOK_URL"
             
