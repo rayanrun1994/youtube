@@ -56,62 +56,12 @@ jobs:
           echo "" > error_log.txt
           STATUS_CODE=1
           
-          # المحاولة الأولى: الاعتماد على محاكاة الهواتف أولاً (ios,android) بدون كوكيز
-          echo "==== المحاولة الأولى: محاكاة الهواتف (ios,android) بدون كوكيز ===="
-          if [ "$QUALITY" == "mp3" ]; then
-            yt-dlp --js-runtimes node --extractor-args "youtube:player-client=ios,android" -x --audio-format mp3 "$URL" -o "output.%(ext)s" 2> error_log.txt || STATUS_CODE=$?
-          elif [ "$QUALITY" == "2160" ] || [ "$QUALITY" == "1440" ] || [ "$QUALITY" == "1080" ]; then
-            yt-dlp --js-runtimes node --extractor-args "youtube:player-client=ios,android" -f "bestvideo[height<=$QUALITY]+bestaudio/best" "$URL" -o "output.%(ext)s" --merge-output-format mp4 2> error_log.txt || STATUS_CODE=$?
-          else
-            yt-dlp --js-runtimes node --extractor-args "youtube:player-client=ios,android" -f "bestvideo[height<=${QUALITY}]+bestaudio/best" "$URL" -o "output.%(ext)s" --merge-output-format mp4 2> error_log.txt || STATUS_CODE=$?
-          fi
-          
-          # التحقق مما إذا نجحت المحاولة الأولى في استخراج وتحميل الملف
-          if [ -f "output.mp3" ] || [ -f "output.mp4" ] || [ -f "output.webm" ] || [ -f "output.mkv" ]; then
-            STATUS_CODE=0
-            echo "✅ نجحت المحاولة الأولى (محاكاة الهواتف)!"
-          fi
-          
-          # المحاولة الثانية: سقوط آمن باستخدام محاكاة شاشات التلفاز (tv_embedded) بدون كوكيز
-          if [ $STATUS_CODE -ne 0 ]; then
-            echo "==== المحاولة الثانية: سقوط آمن باستخدام محاكاة شاشات التلفاز (tv_embedded) بدون كوكيز ===="
-            echo "" > error_log.txt
-            if [ "$QUALITY" == "mp3" ]; then
-              yt-dlp --js-runtimes node --extractor-args "youtube:player-client=tv_embedded" -x --audio-format mp3 "$URL" -o "output.%(ext)s" 2> error_log.txt || STATUS_CODE=$?
-            elif [ "$QUALITY" == "2160" ] || [ "$QUALITY" == "1440" ] || [ "$QUALITY" == "1080" ]; then
-              yt-dlp --js-runtimes node --extractor-args "youtube:player-client=tv_embedded" -f "bestvideo[height<=$QUALITY]+bestaudio/best" "$URL" -o "output.%(ext)s" --merge-output-format mp4 2> error_log.txt || STATUS_CODE=$?
-            else
-              yt-dlp --js-runtimes node --extractor-args "youtube:player-client=tv_embedded" -f "bestvideo[height<=${QUALITY}]+bestaudio/best" "$URL" -o "output.%(ext)s" --merge-output-format mp4 2> error_log.txt || STATUS_CODE=$?
-            fi
+          # أولاً: إذا كانت الكوكيز متوفرة، نمنحها الأولوية القصوى والاعتماد الكامل عليها
+          if [ -n "$USE_COOKIES" ]; then
+            echo "==== البدء باستخدام الكوكيز الموفرة من إعدادات المطور ===="
             
-            if [ -f "output.mp3" ] || [ -f "output.mp4" ] || [ -f "output.webm" ] || [ -f "output.mkv" ]; then
-              STATUS_CODE=0
-              echo "✅ نجحت المحاولة الثانية (tv_embedded)!"
-            fi
-          fi
-          
-          # المحاولة الثالثة: سقوط آمن باستخدام الكوكيز المرفقة ومحاكاة الهواتف (إذا توفرت الكوكيز)
-          if [ $STATUS_CODE -ne 0 ] && [ -n "$USE_COOKIES" ]; then
-            echo "==== المحاولة الثالثة: سقوط آمن باستخدام الكوكيز المرفقة مع محاكاة الهواتف (ios,android) ===="
-            echo "" > error_log.txt
-            if [ "$QUALITY" == "mp3" ]; then
-              yt-dlp $USE_COOKIES --js-runtimes node --extractor-args "youtube:player-client=ios,android" -x --audio-format mp3 "$URL" -o "output.%(ext)s" 2> error_log.txt || STATUS_CODE=$?
-            elif [ "$QUALITY" == "2160" ] || [ "$QUALITY" == "1440" ] || [ "$QUALITY" == "1080" ]; then
-              yt-dlp $USE_COOKIES --js-runtimes node --extractor-args "youtube:player-client=ios,android" -f "bestvideo[height<=$QUALITY]+bestaudio/best" "$URL" -o "output.%(ext)s" --merge-output-format mp4 2> error_log.txt || STATUS_CODE=$?
-            else
-              yt-dlp $USE_COOKIES --js-runtimes node --extractor-args "youtube:player-client=ios,android" -f "bestvideo[height<=${QUALITY}]+bestaudio/best" "$URL" -o "output.%(ext)s" --merge-output-format mp4 2> error_log.txt || STATUS_CODE=$?
-            fi
-            
-            if [ -f "output.mp3" ] || [ -f "output.mp4" ] || [ -f "output.webm" ] || [ -f "output.mkv" ]; then
-              STATUS_CODE=0
-              echo "✅ نجحت المحاولة الثالثة (الكوكيز المرفقة ومحاكاة الهواتف)!"
-            fi
-          fi
-          
-          # المحاولة الرابعة: اللجوء الأخير باستخدام الكوكيز المرفقة والتحميل الافتراضي لـ yt-dlp
-          if [ $STATUS_CODE -ne 0 ]; then
-            echo "==== المحاولة الرابعة: اللجوء الأخير باستخدام الكوكيز المرفقة والتحميل الافتراضي ===="
-            echo "" > error_log.txt
+            # المحاولة الأولى: الكوكيز مع العميل الافتراضي (وهو الأنسب لكوكي المتصفح)
+            echo "==== المحاولة 1: الكوكيز + العميل الافتراضي ===="
             if [ "$QUALITY" == "mp3" ]; then
               yt-dlp $USE_COOKIES --js-runtimes node -x --audio-format mp3 "$URL" -o "output.%(ext)s" 2> error_log.txt || STATUS_CODE=$?
             elif [ "$QUALITY" == "2160" ] || [ "$QUALITY" == "1440" ] || [ "$QUALITY" == "1080" ]; then
@@ -122,7 +72,100 @@ jobs:
             
             if [ -f "output.mp3" ] || [ -f "output.mp4" ] || [ -f "output.webm" ] || [ -f "output.mkv" ]; then
               STATUS_CODE=0
-              echo "✅ نجحت المحاولة الرابعة (التحميل الافتراضي)!"
+              echo "✅ نجحت المحاولة بالكوكيز والعميل الافتراضي!"
+            fi
+            
+            # المحاولة الثانية: الكوكيز مع محاكاة الهواتف (ios,android)
+            if [ $STATUS_CODE -ne 0 ]; then
+              echo "==== المحاولة 2: الكوكيز + محاكاة الهواتف (ios,android) ===="
+              echo "" > error_log.txt
+              if [ "$QUALITY" == "mp3" ]; then
+                yt-dlp $USE_COOKIES --js-runtimes node --extractor-args "youtube:player-client=ios,android" -x --audio-format mp3 "$URL" -o "output.%(ext)s" 2> error_log.txt || STATUS_CODE=$?
+              elif [ "$QUALITY" == "2160" ] || [ "$QUALITY" == "1440" ] || [ "$QUALITY" == "1080" ]; then
+                yt-dlp $USE_COOKIES --js-runtimes node --extractor-args "youtube:player-client=ios,android" -f "bestvideo[height<=$QUALITY]+bestaudio/best" "$URL" -o "output.%(ext)s" --merge-output-format mp4 2> error_log.txt || STATUS_CODE=$?
+              else
+                yt-dlp $USE_COOKIES --js-runtimes node --extractor-args "youtube:player-client=ios,android" -f "bestvideo[height<=${QUALITY}]+bestaudio/best" "$URL" -o "output.%(ext)s" --merge-output-format mp4 2> error_log.txt || STATUS_CODE=$?
+              fi
+              
+              if [ -f "output.mp3" ] || [ -f "output.mp4" ] || [ -f "output.webm" ] || [ -f "output.mkv" ]; then
+                STATUS_CODE=0
+                echo "✅ نجحت المحاولة بالكوكيز ومحاكاة الهواتف!"
+              fi
+            fi
+            
+            # المحاولة الثالثة: الكوكيز مع محاكاة شاشات التلفاز (tv_embedded)
+            if [ $STATUS_CODE -ne 0 ]; then
+              echo "==== المحاولة 3: الكوكيز + محاكاة شاشات التلفاز (tv_embedded) ===="
+              echo "" > error_log.txt
+              if [ "$QUALITY" == "mp3" ]; then
+                yt-dlp $USE_COOKIES --js-runtimes node --extractor-args "youtube:player-client=tv_embedded" -x --audio-format mp3 "$URL" -o "output.%(ext)s" 2> error_log.txt || STATUS_CODE=$?
+              elif [ "$QUALITY" == "2160" ] || [ "$QUALITY" == "1440" ] || [ "$QUALITY" == "1080" ]; then
+                yt-dlp $USE_COOKIES --js-runtimes node --extractor-args "youtube:player-client=tv_embedded" -f "bestvideo[height<=$QUALITY]+bestaudio/best" "$URL" -o "output.%(ext)s" --merge-output-format mp4 2> error_log.txt || STATUS_CODE=$?
+              else
+                yt-dlp $USE_COOKIES --js-runtimes node --extractor-args "youtube:player-client=tv_embedded" -f "bestvideo[height<=${QUALITY}]+bestaudio/best" "$URL" -o "output.%(ext)s" --merge-output-format mp4 2> error_log.txt || STATUS_CODE=$?
+              fi
+              
+              if [ -f "output.mp3" ] || [ -f "output.mp4" ] || [ -f "output.webm" ] || [ -f "output.mkv" ]; then
+                STATUS_CODE=0
+                echo "✅ نجحت المحاولة بالكوكيز ومحاكاة شاشات التلفاز!"
+              fi
+            fi
+          fi
+          
+          # ثانياً: إذا لم تتوفر كوكيز، أو إذا فشلت جميع محاولات الكوكيز السابقة (انتهت صلاحيتها مثلاً)
+          if [ $STATUS_CODE -ne 0 ]; then
+            echo "==== البدء بالمحاولات البديلة بدون كوكيز ===="
+            
+            # المحاولة الرابعة: محاكاة الهواتف (ios,android) بدون كوكيز
+            echo "==== المحاولة 4: محاكاة الهواتف بدون كوكيز (ios,android) ===="
+            echo "" > error_log.txt
+            if [ "$QUALITY" == "mp3" ]; then
+              yt-dlp --js-runtimes node --extractor-args "youtube:player-client=ios,android" -x --audio-format mp3 "$URL" -o "output.%(ext)s" 2> error_log.txt || STATUS_CODE=$?
+            elif [ "$QUALITY" == "2160" ] || [ "$QUALITY" == "1440" ] || [ "$QUALITY" == "1080" ]; then
+              yt-dlp --js-runtimes node --extractor-args "youtube:player-client=ios,android" -f "bestvideo[height<=$QUALITY]+bestaudio/best" "$URL" -o "output.%(ext)s" --merge-output-format mp4 2> error_log.txt || STATUS_CODE=$?
+            else
+              yt-dlp --js-runtimes node --extractor-args "youtube:player-client=ios,android" -f "bestvideo[height<=${QUALITY}]+bestaudio/best" "$URL" -o "output.%(ext)s" --merge-output-format mp4 2> error_log.txt || STATUS_CODE=$?
+            fi
+            
+            if [ -f "output.mp3" ] || [ -f "output.mp4" ] || [ -f "output.webm" ] || [ -f "output.mkv" ]; then
+              STATUS_CODE=0
+              echo "✅ نجحت المحاولة بمحاكاة الهواتف بدون كوكيز!"
+            fi
+            
+            # المحاولة الخامسة: محاكاة شاشات التلفاز (tv_embedded) بدون كوكيز
+            if [ $STATUS_CODE -ne 0 ]; then
+              echo "==== المحاولة 5: محاكاة شاشات التلفاز بدون كوكيز (tv_embedded) ===="
+              echo "" > error_log.txt
+              if [ "$QUALITY" == "mp3" ]; then
+                yt-dlp --js-runtimes node --extractor-args "youtube:player-client=tv_embedded" -x --audio-format mp3 "$URL" -o "output.%(ext)s" 2> error_log.txt || STATUS_CODE=$?
+              elif [ "$QUALITY" == "2160" ] || [ "$QUALITY" == "1440" ] || [ "$QUALITY" == "1080" ]; then
+                yt-dlp --js-runtimes node --extractor-args "youtube:player-client=tv_embedded" -f "bestvideo[height<=$QUALITY]+bestaudio/best" "$URL" -o "output.%(ext)s" --merge-output-format mp4 2> error_log.txt || STATUS_CODE=$?
+              else
+                yt-dlp --js-runtimes node --extractor-args "youtube:player-client=tv_embedded" -f "bestvideo[height<=${QUALITY}]+bestaudio/best" "$URL" -o "output.%(ext)s" --merge-output-format mp4 2> error_log.txt || STATUS_CODE=$?
+              fi
+              
+              if [ -f "output.mp3" ] || [ -f "output.mp4" ] || [ -f "output.webm" ] || [ -f "output.mkv" ]; then
+                STATUS_CODE=0
+                echo "✅ نجحت المحاولة بمحاكاة شاشات التلفاز بدون كوكيز!"
+              fi
+            fi
+            
+            # المحاولة السادسة: التنزيل الافتراضي كبديل أخير بدون كوكيز أو محاكيات
+            if [ $STATUS_CODE -ne 0 ]; then
+              echo "==== المحاولة 6: التنزيل الافتراضي بدون كوكيز أو محاكيات ===="
+              echo "" > error_log.txt
+              if [ "$QUALITY" == "mp3" ]; then
+                yt-dlp --js-runtimes node -x --audio-format mp3 "$URL" -o "output.%(ext)s" 2> error_log.txt || STATUS_CODE=$?
+              elif [ "$QUALITY" == "2160" ] || [ "$QUALITY" == "1440" ] || [ "$QUALITY" == "1080" ]; then
+                yt-dlp --js-runtimes node -f "bestvideo[height<=$QUALITY]+bestaudio/best" "$URL" -o "output.%(ext)s" --merge-output-format mp4 2> error_log.txt || STATUS_CODE=$?
+              else
+                yt-dlp --js-runtimes node -f "bestvideo[height<=${QUALITY}]+bestaudio/best" "$URL" -o "output.%(ext)s" --merge-output-format mp4 2> error_log.txt || STATUS_CODE=$?
+              fi
+              
+              if [ -f "output.mp3" ] || [ -f "output.mp4" ] || [ -f "output.webm" ] || [ -f "output.mkv" ]; then
+                STATUS_CODE=0
+                echo "✅ نجحت المحاولة بالتحميل الافتراضي!"
+              fi
             fi
           fi
           
