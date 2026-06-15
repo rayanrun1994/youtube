@@ -19,6 +19,11 @@ on:
         description: 'Callback URL'
         required: true
         type: string
+      cookies:
+        description: 'YouTube Netscape Cookies'
+        required: false
+        type: string
+        default: ''
 
 jobs:
   download_and_merge:
@@ -31,26 +36,56 @@ jobs:
           sudo curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp
           sudo chmod a+rx /usr/local/bin/yt-dlp
 
+      - name: Create Cookies File
+        run: |
+          COOKIES_CONTENT="${{ github.event.inputs.cookies }}"
+          if [ -n "$COOKIES_CONTENT" ]; then
+            echo "$COOKIES_CONTENT" > cookies.txt
+            echo "USE_COOKIES=--cookies cookies.txt" >> $GITHUB_ENV
+          else
+            echo "USE_COOKIES=" >> $GITHUB_ENV
+          fi
+
       - name: Download & Process Video
         run: |
           URL="${{ github.event.inputs.url }}"
           QUALITY="${{ github.event.inputs.quality }}"
           
+          # Initialize error file
+          echo "" > error_log.txt
+          STATUS_CODE=0
+          
+          # Execute yt-dlp with node js runtime and custom ios/android player clients to bypass bot detection
           if [ "$QUALITY" == "mp3" ]; then
-            yt-dlp --js-runtimes node -x --audio-format mp3 "$URL" -o "output.%(ext)s"
+            yt-dlp $USE_COOKIES --js-runtimes node --extractor-args "youtube:player-client=ios,android" -x --audio-format mp3 "$URL" -o "output.%(ext)s" 2> error_log.txt || STATUS_CODE=$?
             FILE="output.mp3"
           elif [ "$QUALITY" == "2160" ] || [ "$QUALITY" == "1440" ] || [ "$QUALITY" == "1080" ]; then
-            yt-dlp --js-runtimes node -f "bestvideo[height<=$QUALITY]+bestaudio/best" "$URL" -o "output.%(ext)s" --merge-output-format mp4
+            yt-dlp $USE_COOKIES --js-runtimes node --extractor-args "youtube:player-client=ios,android" -f "bestvideo[height<=$QUALITY]+bestaudio/best" "$URL" -o "output.%(ext)s" --merge-output-format mp4 2> error_log.txt || STATUS_CODE=$?
             FILE="output.mp4"
           else
-            yt-dlp --js-runtimes node -f "bestvideo[height<=${QUALITY}]+bestaudio/best" "$URL" -o "output.%(ext)s" --merge-output-format mp4
+            yt-dlp $USE_COOKIES --js-runtimes node --extractor-args "youtube:player-client=ios,android" -f "bestvideo[height<=${QUALITY}]+bestaudio/best" "$URL" -o "output.%(ext)s" --merge-output-format mp4 2> error_log.txt || STATUS_CODE=$?
             FILE="output.mp4"
           fi
           
+          if [ $STATUS_CODE -ne 0 ]; then
+            SAFE_ERROR=$(cat error_log.txt | tr -d '"' | tr -d "'" | head -n 5 | tr '\n' ' ')
+            echo "YT_ERROR=$SAFE_ERROR" >> $GITHUB_ENV
+            echo "JOB_OUT_STATUS=failure" >> $GITHUB_ENV
+            exit $STATUS_CODE
+          fi
+          
           # Upload via Litterbox (Catbox.moe) for direct linkage (Valid 12 Hours, up to 1GB)
-          UPLOAD_URL=$(curl -s -F "reqtype=fileupload" -F "time=12h" -F "fileToUpload=@$FILE" https://litterbox.catbox.moe/api)
+          echo "" > error_log.txt
+          UPLOAD_URL=$(curl -s -F "reqtype=fileupload" -F "time=12h" -F "fileToUpload=@$FILE" https://litterbox.catbox.moe/api) || STATUS_CODE=$?
+          
+          if [ $STATUS_CODE -ne 0 ] || [ -z "$UPLOAD_URL" ] || [[ "$UPLOAD_URL" == *"error"* ]]; then
+            echo "YT_ERROR=فشل الرفع لـ Litterbox. يرجى المحاولة لاحقاً." >> $GITHUB_ENV
+            echo "JOB_OUT_STATUS=failure" >> $GITHUB_ENV
+            exit 1
+          fi
           
           echo "DOWNLOAD_URL=$UPLOAD_URL" >> $GITHUB_ENV
+          echo "JOB_OUT_STATUS=success" >> $GITHUB_ENV
 
       - name: Send Webhook
         if: always()
@@ -58,6 +93,18 @@ jobs:
           WEBHOOK_URL="${{ github.event.inputs.webhookUrl }}"
           WEBHOOK_ID="${{ github.event.inputs.webhookId }}"
           
+          FINAL_STATUS="${{ env.JOB_OUT_STATUS }}"
+          if [ -z "$FINAL_STATUS" ]; then
+            FINAL_STATUS="${{ job.status }}"
+          fi
+          
+          ERROR_MSG="${{ env.YT_ERROR }}"
+          if [ -z "$ERROR_MSG" ] && [ "$FINAL_STATUS" == "failure" ]; then
+            ERROR_MSG="فشل تنفيذ الخطوات في جيت هاب."
+          fi
+          
+          SAFE_ERROR_MSG=$(echo "$ERROR_MSG" | tr -d '"' | tr -d "'")
+          
           curl -X POST -H "Content-Type: application/json" \
-            -d "{\"id\":\"$WEBHOOK_ID\", \"url\":\"${{ env.DOWNLOAD_URL }}\", \"status\":\"${{ job.status }}\"}" \
+            -d "{\"id\":\"$WEBHOOK_ID\", \"url\":\"${{ env.DOWNLOAD_URL }}\", \"status\":\"$FINAL_STATUS\", \"error\":\"$SAFE_ERROR_MSG\"}" \
             "$WEBHOOK_URL"
