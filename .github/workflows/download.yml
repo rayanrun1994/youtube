@@ -222,7 +222,7 @@ jobs:
             echo "$UPLOAD_RES"
             FILE_ID=$(echo "$UPLOAD_RES" | jq -r '.result.document.file_id // .result.video.file_id // .result.audio.file_id // .result.voice.file_id // empty')
             if [ -n "$FILE_ID" ] && [[ "$FILE_ID" != "null" ]]; then
-              TEMP_URL="telegram-file:$FILE_ID"
+              TEMP_URL="https://t.me/file?id=$FILE_ID"
               echo "✅ تم الرفع إلى تيليجرام بنجاح! معرف الملف: $FILE_ID"
             else
               echo "⚠️ فشل الرفع لتيليجرام (قد يكون الملف أكبر من حد 50MB المسموح به للبوتات أو أن البوت/القناة غير معدادين)."
