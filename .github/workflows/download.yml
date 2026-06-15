@@ -1,40 +1,6 @@
-name: YouTube Serverless Backend
-
-on:
-  workflow_dispatch:
-    inputs:
-      url:
-        description: 'YouTube Video URL'
-        required: true
-        type: string
-      quality:
-        description: 'Quality (e.g. 1080, mp3)'
-        required: true
-        type: string
-      webhookId:
-        description: 'ID for tracking'
-        required: true
-        type: string
-      webhookUrl:
-        description: 'Callback URL'
-        required: true
-        type: string
-      cookies:
-        description: 'YouTube Netscape Cookies'
-        required: false
-        type: string
-        default: ''
-
-jobs:
-  download_and_merge:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Install Dependencies (yt-dlp & ffmpeg)
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y ffmpeg curl python3
-          sudo curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp
-          sudo chmod a+rx /usr/local/bin/yt-dlp
+echo "YT_ERROR<<EOF" >> $GITHUB_ENV
+cat error_log.txt | head -n 8 >> $GITHUB_ENV
+echo "EOF" >> $GITHUB_ENV          sudo chmod a+rx /usr/local/bin/yt-dlp
 
       - name: Create Cookies File
         run: |
