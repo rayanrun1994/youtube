@@ -24,13 +24,10 @@ jobs:
   download_and_merge:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Install dependencies
+      - name: Install Dependencies (yt-dlp & ffmpeg)
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg
+          sudo apt-get install -y ffmpeg curl python3
           sudo curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp
           sudo chmod a+rx /usr/local/bin/yt-dlp
 
@@ -40,22 +37,20 @@ jobs:
           QUALITY="${{ github.event.inputs.quality }}"
           
           if [ "$QUALITY" == "mp3" ]; then
-            yt-dlp -x --audio-format mp3 "$URL" -o "output.%(ext)s"
+            yt-dlp --js-runtimes node -x --audio-format mp3 "$URL" -o "output.%(ext)s"
+            FILE="output.mp3"
+          elif [ "$QUALITY" == "2160" ] || [ "$QUALITY" == "1440" ] || [ "$QUALITY" == "1080" ]; then
+            yt-dlp --js-runtimes node -f "bestvideo[height<=$QUALITY]+bestaudio/best" "$URL" -o "output.%(ext)s" --merge-output-format mp4
+            FILE="output.mp4"
           else
-            yt-dlp -f "bv*[height<=$QUALITY]+ba/b[height<=$QUALITY]" --merge-output-format mp4 "$URL" -o "output.%(ext)s"
+            yt-dlp --js-runtimes node -f "bestvideo[height<=${QUALITY}]+bestaudio/best" "$URL" -o "output.%(ext)s" --merge-output-format mp4
+            FILE="output.mp4"
           fi
           
-          # الحصول على مسار الملف الناتج وتخزينه في البيئة
-          FILE_PATH=$(find . -name "output.*" | head -n 1)
-          echo "DOWNLOAD_PATH=$FILE_PATH" >> $GITHUB_ENV
-
-      # إضافة خطوات الرفع وإنشاء رابط التحميل هنا (حسب السيرفر السحابي الذي تستخدمه)
-      # لنفترض أنك ترفع الملف على خادم مؤقت أو ترجع الرابط المباشر:
-      - name: Upload Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: youtube-video
-          path: output.*
+          # Upload via Litterbox (Catbox.moe) for direct linkage (Valid 12 Hours, up to 1GB)
+          UPLOAD_URL=$(curl -s -F "reqtype=fileupload" -F "time=12h" -F "fileToUpload=@$FILE" https://litterbox.catbox.moe/api)
+          
+          echo "DOWNLOAD_URL=$UPLOAD_URL" >> $GITHUB_ENV
 
       - name: Send Webhook
         if: always()
@@ -63,7 +58,6 @@ jobs:
           WEBHOOK_URL="${{ github.event.inputs.webhookUrl }}"
           WEBHOOK_ID="${{ github.event.inputs.webhookId }}"
           
-          # تأكد من استبدال DOWNLOAD_URL برابط الرفع النهائي للملف
           curl -X POST -H "Content-Type: application/json" \
             -d "{\"id\":\"$WEBHOOK_ID\", \"url\":\"${{ env.DOWNLOAD_URL }}\", \"status\":\"${{ job.status }}\"}" \
-            $WEBHOOK_URL
+            "$WEBHOOK_URL"
