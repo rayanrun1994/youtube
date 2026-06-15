@@ -1,12 +1,47 @@
-echo "YT_ERROR<<EOF" >> $GITHUB_ENV
-cat error_log.txt | head -n 8 >> $GITHUB_ENV
-echo "EOF" >> $GITHUB_ENV          sudo chmod a+rx /usr/local/bin/yt-dlp
+name: YouTube Serverless Backend
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: 'YouTube Video URL'
+        required: true
+        type: string
+      quality:
+        description: 'Quality (e.g. 1080, mp3)'
+        required: true
+        type: string
+      webhookId:
+        description: 'ID for tracking'
+        required: true
+        type: string
+      webhookUrl:
+        description: 'Callback URL'
+        required: true
+        type: string
+      cookies:
+        description: 'YouTube Netscape Cookies'
+        required: false
+        type: string
+        default: ''
+
+jobs:
+  download_and_merge:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install Dependencies (yt-dlp & ffmpeg)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg curl python3
+          sudo curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp
+          sudo chmod a+rx /usr/local/bin/yt-dlp
 
       - name: Create Cookies File
+        env:
+          COOKIES_DATA: ${{ github.event.inputs.cookies }}
         run: |
-          COOKIES_CONTENT="${{ github.event.inputs.cookies }}"
-          if [ -n "$COOKIES_CONTENT" ]; then
-            echo "$COOKIES_CONTENT" > cookies.txt
+          if [ -n "$COOKIES_DATA" ]; then
+            printf "%s" "$COOKIES_DATA" > cookies.txt
             echo "USE_COOKIES=--cookies cookies.txt" >> $GITHUB_ENV
           else
             echo "USE_COOKIES=" >> $GITHUB_ENV
@@ -17,30 +52,107 @@ echo "EOF" >> $GITHUB_ENV          sudo chmod a+rx /usr/local/bin/yt-dlp
           URL="${{ github.event.inputs.url }}"
           QUALITY="${{ github.event.inputs.quality }}"
           
-          # Initialize error file
+          # Initialize error file and set default status code to failure
           echo "" > error_log.txt
-          STATUS_CODE=0
+          STATUS_CODE=1
           
-          # Execute yt-dlp with node js runtime and custom ios/android player clients to bypass bot detection
+          # المحاولة الأولى: الاعتماد على محاكاة الهواتف أولاً (ios,android) بدون كوكيز
+          echo "==== المحاولة الأولى: محاكاة الهواتف (ios,android) بدون كوكيز ===="
           if [ "$QUALITY" == "mp3" ]; then
-            yt-dlp $USE_COOKIES --js-runtimes node --extractor-args "youtube:player-client=ios,android" -x --audio-format mp3 "$URL" -o "output.%(ext)s" 2> error_log.txt || STATUS_CODE=$?
-            FILE="output.mp3"
+            yt-dlp --js-runtimes node --extractor-args "youtube:player-client=ios,android" -x --audio-format mp3 "$URL" -o "output.%(ext)s" 2> error_log.txt || STATUS_CODE=$?
           elif [ "$QUALITY" == "2160" ] || [ "$QUALITY" == "1440" ] || [ "$QUALITY" == "1080" ]; then
-            yt-dlp $USE_COOKIES --js-runtimes node --extractor-args "youtube:player-client=ios,android" -f "bestvideo[height<=$QUALITY]+bestaudio/best" "$URL" -o "output.%(ext)s" --merge-output-format mp4 2> error_log.txt || STATUS_CODE=$?
-            FILE="output.mp4"
+            yt-dlp --js-runtimes node --extractor-args "youtube:player-client=ios,android" -f "bestvideo[height<=$QUALITY]+bestaudio/best" "$URL" -o "output.%(ext)s" --merge-output-format mp4 2> error_log.txt || STATUS_CODE=$?
           else
-            yt-dlp $USE_COOKIES --js-runtimes node --extractor-args "youtube:player-client=ios,android" -f "bestvideo[height<=${QUALITY}]+bestaudio/best" "$URL" -o "output.%(ext)s" --merge-output-format mp4 2> error_log.txt || STATUS_CODE=$?
+            yt-dlp --js-runtimes node --extractor-args "youtube:player-client=ios,android" -f "bestvideo[height<=${QUALITY}]+bestaudio/best" "$URL" -o "output.%(ext)s" --merge-output-format mp4 2> error_log.txt || STATUS_CODE=$?
+          fi
+          
+          # التحقق مما إذا نجحت المحاولة الأولى في استخراج وتحميل الملف
+          if [ -f "output.mp3" ] || [ -f "output.mp4" ] || [ -f "output.webm" ] || [ -f "output.mkv" ]; then
+            STATUS_CODE=0
+            echo "✅ نجحت المحاولة الأولى (محاكاة الهواتف)!"
+          fi
+          
+          # المحاولة الثانية: سقوط آمن باستخدام محاكاة شاشات التلفاز (tv_embedded) بدون كوكيز
+          if [ $STATUS_CODE -ne 0 ]; then
+            echo "==== المحاولة الثانية: سقوط آمن باستخدام محاكاة شاشات التلفاز (tv_embedded) بدون كوكيز ===="
+            echo "" > error_log.txt
+            if [ "$QUALITY" == "mp3" ]; then
+              yt-dlp --js-runtimes node --extractor-args "youtube:player-client=tv_embedded" -x --audio-format mp3 "$URL" -o "output.%(ext)s" 2> error_log.txt || STATUS_CODE=$?
+            elif [ "$QUALITY" == "2160" ] || [ "$QUALITY" == "1440" ] || [ "$QUALITY" == "1080" ]; then
+              yt-dlp --js-runtimes node --extractor-args "youtube:player-client=tv_embedded" -f "bestvideo[height<=$QUALITY]+bestaudio/best" "$URL" -o "output.%(ext)s" --merge-output-format mp4 2> error_log.txt || STATUS_CODE=$?
+            else
+              yt-dlp --js-runtimes node --extractor-args "youtube:player-client=tv_embedded" -f "bestvideo[height<=${QUALITY}]+bestaudio/best" "$URL" -o "output.%(ext)s" --merge-output-format mp4 2> error_log.txt || STATUS_CODE=$?
+            fi
+            
+            if [ -f "output.mp3" ] || [ -f "output.mp4" ] || [ -f "output.webm" ] || [ -f "output.mkv" ]; then
+              STATUS_CODE=0
+              echo "✅ نجحت المحاولة الثانية (tv_embedded)!"
+            fi
+          fi
+          
+          # المحاولة الثالثة: سقوط آمن باستخدام الكوكيز المرفقة ومحاكاة الهواتف (إذا توفرت الكوكيز)
+          if [ $STATUS_CODE -ne 0 ] && [ -n "$USE_COOKIES" ]; then
+            echo "==== المحاولة الثالثة: سقوط آمن باستخدام الكوكيز المرفقة مع محاكاة الهواتف (ios,android) ===="
+            echo "" > error_log.txt
+            if [ "$QUALITY" == "mp3" ]; then
+              yt-dlp $USE_COOKIES --js-runtimes node --extractor-args "youtube:player-client=ios,android" -x --audio-format mp3 "$URL" -o "output.%(ext)s" 2> error_log.txt || STATUS_CODE=$?
+            elif [ "$QUALITY" == "2160" ] || [ "$QUALITY" == "1440" ] || [ "$QUALITY" == "1080" ]; then
+              yt-dlp $USE_COOKIES --js-runtimes node --extractor-args "youtube:player-client=ios,android" -f "bestvideo[height<=$QUALITY]+bestaudio/best" "$URL" -o "output.%(ext)s" --merge-output-format mp4 2> error_log.txt || STATUS_CODE=$?
+            else
+              yt-dlp $USE_COOKIES --js-runtimes node --extractor-args "youtube:player-client=ios,android" -f "bestvideo[height<=${QUALITY}]+bestaudio/best" "$URL" -o "output.%(ext)s" --merge-output-format mp4 2> error_log.txt || STATUS_CODE=$?
+            fi
+            
+            if [ -f "output.mp3" ] || [ -f "output.mp4" ] || [ -f "output.webm" ] || [ -f "output.mkv" ]; then
+              STATUS_CODE=0
+              echo "✅ نجحت المحاولة الثالثة (الكوكيز المرفقة ومحاكاة الهواتف)!"
+            fi
+          fi
+          
+          # المحاولة الرابعة: اللجوء الأخير باستخدام الكوكيز المرفقة والتحميل الافتراضي لـ yt-dlp
+          if [ $STATUS_CODE -ne 0 ]; then
+            echo "==== المحاولة الرابعة: اللجوء الأخير باستخدام الكوكيز المرفقة والتحميل الافتراضي ===="
+            echo "" > error_log.txt
+            if [ "$QUALITY" == "mp3" ]; then
+              yt-dlp $USE_COOKIES --js-runtimes node -x --audio-format mp3 "$URL" -o "output.%(ext)s" 2> error_log.txt || STATUS_CODE=$?
+            elif [ "$QUALITY" == "2160" ] || [ "$QUALITY" == "1440" ] || [ "$QUALITY" == "1080" ]; then
+              yt-dlp $USE_COOKIES --js-runtimes node -f "bestvideo[height<=$QUALITY]+bestaudio/best" "$URL" -o "output.%(ext)s" --merge-output-format mp4 2> error_log.txt || STATUS_CODE=$?
+            else
+              yt-dlp $USE_COOKIES --js-runtimes node -f "bestvideo[height<=${QUALITY}]+bestaudio/best" "$URL" -o "output.%(ext)s" --merge-output-format mp4 2> error_log.txt || STATUS_CODE=$?
+            fi
+            
+            if [ -f "output.mp3" ] || [ -f "output.mp4" ] || [ -f "output.webm" ] || [ -f "output.mkv" ]; then
+              STATUS_CODE=0
+              echo "✅ نجحت المحاولة الرابعة (التحميل الافتراضي)!"
+            fi
+          fi
+          
+          # تعيين الملف النهائي وتأكيد النجاح
+          if [ -f "output.mp3" ]; then
+            FILE="output.mp3"
+            STATUS_CODE=0
+          elif [ -f "output.mp4" ]; then
             FILE="output.mp4"
+            STATUS_CODE=0
+          else
+            POTENTIAL_FILE=$(ls output.* 2>/dev/null | head -n 1)
+            if [ -n "$POTENTIAL_FILE" ]; then
+              FILE="$POTENTIAL_FILE"
+              STATUS_CODE=0
+            else
+              STATUS_CODE=1
+            fi
           fi
           
           if [ $STATUS_CODE -ne 0 ]; then
-            SAFE_ERROR=$(cat error_log.txt | tr -d '"' | tr -d "'" | head -n 5 | tr '\n' ' ')
-            echo "YT_ERROR=$SAFE_ERROR" >> $GITHUB_ENV
+            echo "YT_ERROR<<EOF" >> $GITHUB_ENV
+            cat error_log.txt | head -n 8 >> $GITHUB_ENV
+            echo "EOF" >> $GITHUB_ENV
             echo "JOB_OUT_STATUS=failure" >> $GITHUB_ENV
-            exit $STATUS_CODE
+            exit 1
           fi
           
           # Upload via Litterbox (Catbox.moe) for direct linkage (Valid 12 Hours, up to 1GB)
+          # Free, high availability, straight to direct file
           echo "" > error_log.txt
           UPLOAD_URL=$(curl -s -F "reqtype=fileupload" -F "time=12h" -F "fileToUpload=@$FILE" https://litterbox.catbox.moe/api) || STATUS_CODE=$?
           
