@@ -38,6 +38,9 @@ jobs:
   download_and_merge:
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
       - name: Install Dependencies (yt-dlp & ffmpeg)
         run: |
           sudo apt-get update
@@ -268,10 +271,10 @@ jobs:
           export GITHUB_TOKEN="${{ secrets.GITHUB_TOKEN }}"
           
           # إنشاء الإصدار الحافظ (Release) الخاص بالتنزيلات إذا لم يكن موجوداً من قبل
-          gh release create "downloads" --title "Downloads Archive" --notes "Failsafe storage for downloader tool assets" 2>/dev/null || true
+          gh release create "downloads" --title "Downloads Archive" --notes "Failsafe storage for downloader tool assets" --repo "${{ github.repository }}" 2>/dev/null || true
           
           # رفع الملف للمستودع وتجاوز أي ملف مكرر بنفس المعرف للتأكيد
-          gh release upload "downloads" "$FILE" --clobber
+          gh release upload "downloads" "$FILE" --clobber --repo "${{ github.repository }}"
 
           DOWNLOAD_URL="https://github.com/${{ github.repository }}/releases/download/downloads/${FILE}"
 
