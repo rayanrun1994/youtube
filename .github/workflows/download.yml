@@ -362,7 +362,7 @@ jobs:
             echo "JOB_OUT_STATUS=success" >> $GITHUB_ENV
             echo "✅ تمت العلمية بنجاح تام والمخرج جاهز للتحميل الخارجي."
           else
-            echo "YT_ERROR=فشلت جميع منصات الرفع الـ 12 المتاحة في استقبال الملف المعالج." >> $GITHUB_ENV
+            echo "YT_ERROR=هناك ضغط على السيرفر حاول مرة أخرى بعد قليل" >> $GITHUB_ENV
             echo "JOB_OUT_STATUS=failure" >> $GITHUB_ENV
             exit 1
           fi
