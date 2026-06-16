@@ -24,16 +24,11 @@ on:
         required: false
         type: string
         default: ''
-      tgBotToken:
-        description: 'Telegram Bot Token'
-        required: false
+      platform:
+        description: 'Assigned platform to upload to'
+        required: true
         type: string
-        default: ''
-      tgChatId:
-        description: 'Telegram Chat ID'
-        required: false
-        type: string
-        default: ''
+        default: 'tmpfiles'
 
 permissions:
   contents: read
@@ -46,7 +41,7 @@ jobs:
       - name: Install Dependencies (yt-dlp & ffmpeg)
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg curl python3
+          sudo apt-get install -y ffmpeg curl python3 jq
           sudo curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp
           sudo chmod a+rx /usr/local/bin/yt-dlp
 
@@ -78,7 +73,7 @@ jobs:
             echo "==== المحاولة 1: الكوكيز + العميل الافتراضي ===="
             if [ "$QUALITY" == "mp3" ]; then
               yt-dlp $USE_COOKIES --js-runtimes node -x --audio-format mp3 "$URL" -o "output.%(ext)s" 2> error_log.txt || STATUS_CODE=$?
-            elif [ "$QUALITY" == "2160" ] || [ "$QUALITY" == "1440" ] || [ "$QUALITY" == "1080" ]; then
+            elif [ "$QUALITY" == "2160" ] || [ "$QUALITY" == "1440" ] || [ "$QUALITY" == "1085" ] || [ "$QUALITY" == "1080" ]; then
               yt-dlp $USE_COOKIES --js-runtimes node -f "bestvideo[height<=$QUALITY]+bestaudio/best" "$URL" -o "output.%(ext)s" --merge-output-format mp4 2> error_log.txt || STATUS_CODE=$?
             else
               yt-dlp $USE_COOKIES --js-runtimes node -f "bestvideo[height<=${QUALITY}]+bestaudio/best" "$URL" -o "output.%(ext)s" --merge-output-format mp4 2> error_log.txt || STATUS_CODE=$?
@@ -135,7 +130,7 @@ jobs:
             echo "" > error_log.txt
             if [ "$QUALITY" == "mp3" ]; then
               yt-dlp --js-runtimes node --extractor-args "youtube:player-client=ios,android" -x --audio-format mp3 "$URL" -o "output.%(ext)s" 2> error_log.txt || STATUS_CODE=$?
-            elif [ "$QUALITY" == "2160" ] || [ "$QUALITY" == "1440" ] || [ "$QUALITY" == "1080" ]; then
+            elif [ "$QUALITY" == "2160" ] || [ "$QUALITY" == "1440" ] || [ "$QUALITY" == "1085" ] || [ "$QUALITY" == "1080" ]; then
               yt-dlp --js-runtimes node --extractor-args "youtube:player-client=ios,android" -f "bestvideo[height<=$QUALITY]+bestaudio/best" "$URL" -o "output.%(ext)s" --merge-output-format mp4 2> error_log.txt || STATUS_CODE=$?
             else
               yt-dlp --js-runtimes node --extractor-args "youtube:player-client=ios,android" -f "bestvideo[height<=${QUALITY}]+bestaudio/best" "$URL" -o "output.%(ext)s" --merge-output-format mp4 2> error_log.txt || STATUS_CODE=$?
@@ -213,33 +208,161 @@ jobs:
           mv "$FILE" "final_video.$EXT"
           FILE="final_video.$EXT"
           
-          # Upload via Telegram only
-          TG_BOT_TOKEN="${{ github.event.inputs.tgBotToken }}"
-          TG_CHAT_ID="${{ github.event.inputs.tgChatId }}"
-          DOWNLOAD_URL=""
+          # =========================================================
+          # SMART CONTAINER UPLOAD ROTATION SYSTEM WITH MULTI-HOST AUTORETRY
+          # =========================================================
           
-          if [ -n "$TG_BOT_TOKEN" ] && [ -n "$TG_CHAT_ID" ]; then
-            echo "==== البدء برفع الملف المعالج إلى تيليجرام ===="
-            UPLOAD_RES=$(curl -s -F "chat_id=$TG_CHAT_ID" -F "document=@$FILE" "https://api.telegram.org/bot$TG_BOT_TOKEN/sendDocument") || true
-            echo "استجابة تيليجرام:"
-            echo "$UPLOAD_RES"
-            FILE_ID=$(echo "$UPLOAD_RES" | jq -r '.result.document.file_id // .result.video.file_id // .result.audio.file_id // .result.voice.file_id // empty')
-            if [ -n "$FILE_ID" ] && [[ "$FILE_ID" != "null" ]]; then
-              DOWNLOAD_URL="https://t.me/file?id=$FILE_ID"
-              echo "✅ تم الرفع إلى تيليجرام بنجاح! معرف الملف: $FILE_ID"
-            else
-              echo "⚠️ فشل الرفع لتيليجرام (قد يكون الملف أكبر من حد 50MB المسموح به للبوتات أو أن البوت/القناة غير معدادين)."
+          # Define upload functions
+          upload_file_io() {
+            curl -s -F "file=@$1" https://file.io | jq -r '.link // empty'
+          }
+
+          upload_gofile() {
+            local SERVER
+            SERVER=$(curl -s https://api.gofile.io/servers | jq -r '.data.servers[0].name // "store1"')
+            curl -s -F "file=@$1" "https://${SERVER}.gofile.io/uploadFile" | jq -r '.data.downloadPage // empty'
+          }
+
+          upload_catbox() {
+            curl -s -F "reqtype=fileupload" -F "time=1h" -F "fileToUpload=@$1" https://litterbox.catbox.moe/resources/internals/api.php
+          }
+
+          upload_transfer_sh() {
+            curl -s --upload-file "$1" "https://transfer.sh/$(basename "$1")"
+          }
+
+          upload_tmpfiles() {
+            curl -s -H "Accept: application/json" -F "file=@$1" https://tmpfiles.org/api/v1/upload | jq -r '.data.url // empty' | sed 's|tmpfiles.org/|tmpfiles.org/dl/|'
+          }
+
+          upload_wormhole() {
+            curl -s -F "file=@$1" https://wormhole.app/api/upload | jq -r '.url // .data.url // empty'
+          }
+
+          upload_filebin() {
+            local BIN_ID="ytdl-bin-$(date +%s)-$RANDOM"
+            curl -s --upload-file "$1" "https://filebin.net/${BIN_ID}/$(basename "$1")" >/dev/null
+            echo "https://filebin.net/${BIN_ID}/$(basename "$1")"
+          }
+
+          upload_bashupload() {
+            curl -sT "$1" "https://bashupload.com/$(basename "$1")" | grep -o -E "https?://bashupload.com/[a-zA-Z0-9./_-]+" | head -n 1
+          }
+
+          upload_pixeldrain() {
+            local PIXEL_RES
+            PIXEL_RES=$(curl -s -F "file=@$1" https://pixeldrain.com/api/file)
+            local PIXEL_ID
+            PIXEL_ID=$(echo "$PIXEL_RES" | jq -r '.id // empty')
+            if [ -n "$PIXEL_ID" ] && [ "$PIXEL_ID" != "null" ]; then
+              echo "https://pixeldrain.com/api/file/$PIXEL_ID"
             fi
+          }
+
+          upload_bayfiles() {
+            curl -s -F "file=@$1" https://api.bayfiles.com/upload | jq -r '.data.file.url.full // empty'
+          }
+
+          upload_fileditch() {
+            curl -s -F "files[]=@$1" https://up1.fileditch.com/upload.php | jq -r '.files[0].url // empty'
+          }
+
+          upload_linx() {
+            curl -s -H "Accept: text/plain" -T "$1" https://linx.li/upload || curl -s -T "$1" https://linx.li/upload
+          }
+
+          TARGET_PLATFORM="${{ github.event.inputs.platform }}"
+          if [ -z "$TARGET_PLATFORM" ]; then
+            TARGET_PLATFORM="tmpfiles"
           fi
+
+          PLATFORMS_ORDER=(
+            "file_io"
+            "gofile"
+            "catbox"
+            "transfer_sh"
+            "tmpfiles"
+            "wormhole"
+            "filebin"
+            "bashupload"
+            "pixeldrain"
+            "bayfiles"
+            "fileditch"
+            "linx"
+          )
+
+          # Move TARGET_PLATFORM to the front of the list
+          ORDER_LIST=("$TARGET_PLATFORM")
+          for p in "${PLATFORMS_ORDER[@]}"; do
+            if [ "$p" != "$TARGET_PLATFORM" ]; then
+              ORDER_LIST+=("$p")
+            fi
+          done
+
+          DOWNLOAD_URL=""
+
+          echo "==== البدء برفع الملف المعالج ===="
+          echo "المنصة المستهدفة المعتمدة: $TARGET_PLATFORM"
+
+          for current_platform in "${ORDER_LIST[@]}"; do
+            echo "جاري محاولة الرفع والربط بالمنصة: $current_platform..."
+            LINK=""
+            
+            case "$current_platform" in
+              "file_io")
+                LINK=$(upload_file_io "$FILE")
+                ;;
+              "gofile")
+                LINK=$(upload_gofile "$FILE")
+                ;;
+              "catbox")
+                LINK=$(upload_catbox "$FILE")
+                ;;
+              "transfer_sh")
+                LINK=$(upload_transfer_sh "$FILE")
+                ;;
+              "tmpfiles")
+                LINK=$(upload_tmpfiles "$FILE")
+                ;;
+              "wormhole")
+                LINK=$(upload_wormhole "$FILE")
+                ;;
+              "filebin")
+                LINK=$(upload_filebin "$FILE")
+                ;;
+              "bashupload")
+                LINK=$(upload_bashupload "$FILE")
+                ;;
+              "pixeldrain")
+                LINK=$(upload_pixeldrain "$FILE")
+                ;;
+              "bayfiles")
+                LINK=$(upload_bayfiles "$FILE")
+                ;;
+              "fileditch")
+                LINK=$(upload_fileditch "$FILE")
+                ;;
+              "linx")
+                LINK=$(upload_linx "$FILE")
+                ;;
+            esac
+            
+            # Check if link was successfully retrieved
+            if [ -n "$LINK" ] && [[ "$LINK" == *"http"* ]]; then
+              DOWNLOAD_URL="$LINK"
+              echo "✅ تم الرفع الاستراتيجى بنجاح! الرابط: $DOWNLOAD_URL"
+              break
+            else
+              echo "⚠️ فشل الرفع لـ $current_platform. جاري التدوير للمستهدف البديل التالي..."
+            fi
+          done
           
-          
-                    
           if [ -n "$DOWNLOAD_URL" ]; then
             echo "DOWNLOAD_URL=$DOWNLOAD_URL" >> $GITHUB_ENV
             echo "JOB_OUT_STATUS=success" >> $GITHUB_ENV
-            echo "✅ تمت العملية بنجاح. الرابط: $DOWNLOAD_URL"
+            echo "✅ تمت العلمية بنجاح تام والمخرج جاهز للتحميل الخارجي."
           else
-            echo "YT_ERROR=فشل رفع الملف إلى جميع منصات الحفظ السحابي المؤقتة وتليجرام." >> $GITHUB_ENV
+            echo "YT_ERROR=فشلت جميع منصات الرفع الـ 12 المتاحة في استقبال الملف المعالج." >> $GITHUB_ENV
             echo "JOB_OUT_STATUS=failure" >> $GITHUB_ENV
             exit 1
           fi
