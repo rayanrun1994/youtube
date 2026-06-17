@@ -43,8 +43,9 @@ jobs:
 
       - name: Install Dependencies (yt-dlp & ffmpeg)
         run: |
-          sudo apt-get update
-          sudo apt-get install -y ffmpeg curl python3 jq
+          export DEBIAN_FRONTEND=noninteractive
+          sudo -E apt-get update -y
+          sudo -E apt-get install -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" ffmpeg curl python3 jq
           sudo curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp
           sudo chmod a+rx /usr/local/bin/yt-dlp
 
